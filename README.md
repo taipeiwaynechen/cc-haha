@@ -1,5 +1,9 @@
 # Claude Code Haha
 
+<p align="center">
+  <img src="docs/images/banner.jpg" alt="Claude Code Haha Banner" width="800">
+</p>
+
 <div align="center">
 
 [![GitHub Stars](https://img.shields.io/github/stars/NanmiCoder/cc-haha?style=social)](https://github.com/NanmiCoder/cc-haha/stargazers)
@@ -11,10 +15,6 @@
 [![English](https://img.shields.io/badge/🇺🇸_English-Available-green)](README.en.md)
 
 </div>
-
-<p align="center">
-  <img src="docs/images/banner.jpg" alt="Claude Code Haha Banner" width="800">
-</p>
 
 基于 Claude Code 泄露源码修复的**本地可运行版本**，支持接入任意 Anthropic 兼容 API（如 MiniMax、OpenRouter 等）。
 

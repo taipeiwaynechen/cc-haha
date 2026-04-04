@@ -1,5 +1,9 @@
 # Claude Code Haha
 
+<p align="center">
+  <img src="docs/images/banner.jpg" alt="Claude Code Haha Banner" width="800">
+</p>
+
 <div align="center">
 
 [![GitHub Stars](https://img.shields.io/github/stars/NanmiCoder/cc-haha?style=social)](https://github.com/NanmiCoder/cc-haha/stargazers)
@@ -11,10 +15,6 @@
 [![English](https://img.shields.io/badge/🇺🇸_English-当前-blue)](README.en.md)
 
 </div>
-
-<p align="center">
-  <img src="docs/images/banner.jpg" alt="Claude Code Haha Banner" width="800">
-</p>
 
 A **locally runnable version** repaired from the leaked Claude Code source, with support for any Anthropic-compatible API endpoint such as MiniMax and OpenRouter.
 
