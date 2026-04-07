@@ -220,6 +220,12 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           taskStore.setTasksFromTodos(lastTodos)
         }
       }
+
+      // For both V1 and V2: if all tasks completed and the user already
+      // continued chatting, suppress the sticky TaskBar on page refresh.
+      if (hasUserMessagesAfterTaskCompletion(messages)) {
+        useCLITaskStore.getState().markCompletedAndDismissed()
+      }
     } catch {
       // Session may not have messages yet
     }
@@ -575,10 +581,14 @@ export function mapHistoryMessagesToUiMessages(messages: MessageEntry[]): UIMess
   return uiMessages
 }
 
-/** Scan history messages for the last TodoWrite tool_use and return the todos array */
+/** Scan history messages for the last TodoWrite tool_use and return the todos array.
+ *  Returns null if all todos were completed and the user continued chatting after. */
 function extractLastTodoWriteFromHistory(
   messages: MessageEntry[],
 ): Array<{ content: string; status: string; activeForm?: string }> | null {
+  let foundIndex = -1
+  let todos: Array<{ content: string; status: string; activeForm?: string }> | null = null
+
   // Walk backwards to find the most recent TodoWrite
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i]!
@@ -589,11 +599,54 @@ function extractLastTodoWriteFromHistory(
         if (block.type === 'tool_use' && block.name === 'TodoWrite') {
           const input = block.input as { todos?: unknown } | undefined
           if (input && Array.isArray(input.todos)) {
-            return input.todos as Array<{ content: string; status: string; activeForm?: string }>
+            todos = input.todos as Array<{ content: string; status: string; activeForm?: string }>
+            foundIndex = i
+            break
           }
         }
       }
+      if (todos) break
     }
   }
-  return null
+
+  if (!todos) return null
+
+  // If all todos are completed and there are user messages after, the tasks
+  // were already inlined — don't re-show the sticky bar.
+  const allDone = todos.every((t) => t.status === 'completed')
+  if (allDone) {
+    for (let i = foundIndex + 1; i < messages.length; i++) {
+      const msg = messages[i]!
+      if (msg.type === 'user' && msg.content) return null
+    }
+  }
+
+  return todos
+}
+
+const TASK_RELATED_TOOL_NAMES = new Set(['TodoWrite', 'TaskCreate', 'TaskUpdate', 'TaskGet', 'TaskList'])
+
+/** Check if there are user messages after the last task-related tool call.
+ *  Used to determine if completed tasks should be shown as sticky or inline. */
+function hasUserMessagesAfterTaskCompletion(messages: MessageEntry[]): boolean {
+  // Find the index of the last task-related tool call
+  let lastTaskIndex = -1
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i]!
+    if ((msg.type === 'assistant' || msg.type === 'tool_use') && Array.isArray(msg.content)) {
+      const blocks = msg.content as AssistantHistoryBlock[]
+      if (blocks.some((b) => b.type === 'tool_use' && TASK_RELATED_TOOL_NAMES.has(b.name ?? ''))) {
+        lastTaskIndex = i
+        break
+      }
+    }
+  }
+
+  if (lastTaskIndex < 0) return false
+
+  // Check for user messages after the last task tool
+  for (let i = lastTaskIndex + 1; i < messages.length; i++) {
+    if (messages[i]!.type === 'user') return true
+  }
+  return false
 }

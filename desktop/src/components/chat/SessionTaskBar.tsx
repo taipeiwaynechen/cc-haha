@@ -20,9 +20,13 @@ const statusConfig = {
 } as const
 
 export function SessionTaskBar() {
-  const { tasks, expanded, toggleExpanded } = useCLITaskStore()
+  const { tasks, expanded, toggleExpanded, completedAndDismissed } = useCLITaskStore()
 
   if (tasks.length === 0) return null
+
+  // Don't show sticky bar if tasks were completed and the user already continued chatting
+  const allCompleted = tasks.every((t) => t.status === 'completed')
+  if (allCompleted && completedAndDismissed) return null
 
   const completedCount = tasks.filter((t) => t.status === 'completed').length
   const totalCount = tasks.length
