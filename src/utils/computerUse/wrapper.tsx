@@ -27,6 +27,9 @@ import { registerEscHotkey } from './escHotkey.js';
 import { getChicagoCoordinateMode } from './gates.js';
 import { getComputerUseHostAdapter } from './hostAdapter.js';
 import { getComputerUseMCPRenderingOverrides } from './toolRendering.js';
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { homedir } from 'node:os';
 type CallOverride = Pick<Tool, 'call'>['call'];
 type Binding = {
   ctx: ComputerUseSessionContext;
@@ -227,6 +230,64 @@ export function buildSessionContext(): ComputerUseSessionContext {
     formatLockHeldMessage: formatLockHeld
   };
 }
+/**
+ * Load pre-authorized apps from ~/.claude/cc-haha/computer-use-config.json.
+ * Called once when the binding is first created. Pre-authorized apps
+ * are injected into appState so `getAllowedApps()` returns them
+ * immediately — no runtime permission dialog needed.
+ */
+async function loadPreAuthorizedApps(): Promise<void> {
+  try {
+    const configPath = join(
+      process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), '.claude'),
+      'cc-haha',
+      'computer-use-config.json',
+    )
+    const raw = await readFile(configPath, 'utf8')
+    const config = JSON.parse(raw) as {
+      authorizedApps?: { bundleId: string; displayName: string }[]
+      grantFlags?: { clipboardRead?: boolean; clipboardWrite?: boolean; systemKeyCombos?: boolean }
+    }
+
+    if (!config.authorizedApps?.length) return
+
+    const apps = config.authorizedApps.map(a => ({
+      bundleId: a.bundleId,
+      displayName: a.displayName,
+      grantedAt: Date.now(),
+      tier: 'full' as const,
+    }))
+    const flags = {
+      ...DEFAULT_GRANT_FLAGS,
+      ...(config.grantFlags ?? {}),
+    }
+
+    // Inject into appState so getAllowedApps() returns them.
+    // Merge with existing allowedApps (from permission dialog) instead of replacing.
+    if (currentToolUseContext) {
+      currentToolUseContext.setAppState(prev => {
+        const existing = prev.computerUseMcpState?.allowedApps ?? []
+        const existingIds = new Set(existing.map(a => a.bundleId))
+        const merged = [...existing, ...apps.filter(a => !existingIds.has(a.bundleId))]
+        return {
+          ...prev,
+          computerUseMcpState: {
+            ...prev.computerUseMcpState,
+            allowedApps: merged,
+            grantFlags: flags,
+          },
+        }
+      })
+    }
+
+    logForDebugging(`[Computer Use] Loaded ${apps.length} pre-authorized apps from config`)
+  } catch {
+    // Config doesn't exist or is invalid — no pre-authorized apps
+  }
+}
+
+let preAuthLoaded = false
+
 function getOrBind(): Binding {
   if (binding) return binding;
   const ctx = buildSessionContext();
@@ -251,6 +312,12 @@ export function getComputerUseMCPToolOverrides(toolName: string): ComputerUseMCP
     const {
       dispatch
     } = getOrBind();
+
+    // Load pre-authorized apps on first tool call
+    if (!preAuthLoaded) {
+      preAuthLoaded = true;
+      await loadPreAuthorizedApps();
+    }
     const {
       telemetry,
       ...result

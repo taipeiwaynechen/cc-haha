@@ -28,6 +28,7 @@ from Quartz import (
     CGRectContainsPoint,
     CGRectIntersection,
     CGPointMake,
+    CGPreflightScreenCaptureAccess,
     kCGNullWindowID,
     kCGWindowBounds,
     kCGWindowIsOnscreen,
@@ -232,7 +233,16 @@ def choose_display(display_id: int | None) -> dict[str, Any]:
     raise RuntimeError(f"Unknown display: {display_id}")
 
 
+def ensure_screen_recording_permission() -> None:
+    """No-op: CGPreflightScreenCaptureAccess is unreliable for child processes
+    (returns False even when the parent app has TCC permission), and any actual
+    capture attempt triggers a macOS popup on newer versions. Let the actual
+    capture call handle errors instead."""
+    pass
+
+
 def capture_display(display_id: int | None, resize: tuple[int, int] | None = None) -> dict[str, Any]:
+    ensure_screen_recording_permission()
     display = choose_display(display_id)
     monitor = {
         "left": display["originX"],
@@ -262,6 +272,7 @@ def capture_display(display_id: int | None, resize: tuple[int, int] | None = Non
 
 
 def capture_region(region: dict[str, int], resize: tuple[int, int] | None = None) -> dict[str, Any]:
+    ensure_screen_recording_permission()
     with mss.mss() as sct:
         raw = sct.grab(region)
         image = Image.frombytes("RGB", raw.size, raw.rgb)
@@ -461,17 +472,61 @@ def write_clipboard(text: str) -> None:
     pb.setString_forType_(text, NSPasteboardTypeString)
 
 
-def check_permissions() -> dict[str, bool]:
+def detect_screen_recording_permission() -> bool | None:
+    """Best-effort passive screen-recording probe with no system prompt.
+
+    `CGPreflightScreenCaptureAccess()` is fast and explicit when it returns
+    True, but on child processes launched by a TCC-authorized app bundle it can
+    still return False. As a fallback, inspect the visible window list: Apple
+    only exposes other apps' window titles when Screen Recording access is
+    granted. If we can see at least one title, treat the permission as granted.
+    If we can inspect visible windows but every title is blank, treat it as not
+    granted. If window enumeration itself is unavailable, return None.
+    """
+
+    try:
+        if CGPreflightScreenCaptureAccess():
+            return True
+    except Exception:
+        pass
+
+    try:
+        windows = CGWindowListCopyWindowInfo(
+            kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements,
+            kCGNullWindowID,
+        )
+    except Exception:
+        return None
+
+    eligible_windows = 0
+    for window in windows or []:
+        if int(window.get(kCGWindowLayer, 0)) != 0:
+            continue
+        if not bool(window.get(kCGWindowIsOnscreen, True)):
+            continue
+
+        bounds = window.get(kCGWindowBounds) or {}
+        width = int(bounds.get("Width", 0))
+        height = int(bounds.get("Height", 0))
+        if width <= 1 or height <= 1:
+            continue
+
+        eligible_windows += 1
+        if (window.get(kCGWindowName, "") or "").strip():
+            return True
+
+    if eligible_windows > 0:
+        return False
+    return None
+
+
+def check_permissions() -> dict[str, bool | None]:
     accessibility = True
     try:
         run_osascript('tell application "System Events" to get name of first process')
     except Exception:
         accessibility = False
-    screen_recording = True
-    try:
-        capture_display(None)
-    except Exception:
-        screen_recording = False
+    screen_recording = detect_screen_recording_permission()
     return {
         "accessibility": accessibility,
         "screenRecording": screen_recording,
